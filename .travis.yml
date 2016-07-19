@@ -15,4 +15,4 @@ deploy:
   - exec-in-net_linux_amd64
   - exec-in-net_linux_arm
   on:
-    repo: PouuleT/exec-in-net
+    tags: true
