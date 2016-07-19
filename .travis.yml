@@ -1,0 +1,18 @@
+language: go
+go:
+- 1.6
+sudo: false
+before_install:
+- go get github.com/mitchellh/gox
+- go get -v ./...
+script:
+- gox -osarch="linux/arm" -osarch="linux/amd64" .
+deploy:
+  provider: releases
+  api_key:
+    secure: qi9AV8M83p4GlIF2GN3RNX2Bg3ioCi0TztPXZEa/prhLPR+NdT9V4B1J49r0QznHr5TJbOKApmkWa8PCWLcsVOyxvA9SgvLYrL4wzWR7z1RSFLqiSD+vlGpJZJtpGZsLUhCbVH5rseTLSoFdWXKCsr3da1lFfcHIg9NSKzR5uRxhljhKErjVvaX+4GLr91mEmz+7Zvn9zcBVG2g66gJsB1eqZZf7TKmz524PaRbKqvJScFJt1TFW3+I7rWMiIn5MX8oTJKBY0hyuFpbNBZsiXIHqZhpeuCV950asl2C6BagD7a0ngHqdrTrEX0k0nUZJVLwiu3+giAA31hGT8QcSBVCkHF+6b+ihhBtQ7HaUd5j7PaY7PCOzNhsRRd39BwnCsmKIhbH/toZVybz+v+eH0QpTVBjnZ3sw8GE+7TOj8oehfGlvSJ9rrEcI5bAJfR67G3QtYY9cqBpIsT4fQWgX9YmNuhzGZ+BuvuenL3QrzYxpRhYPvfVCYJ1aKRaajerPiSaU321FuyRd3QVHtHkIKUSiVFNby4QSCrEZQcA8Nr8ZJpR9626suqRGKWIOesmC8e4sb4NdGK9rmXG222aDhFlR/Sx+S6pkkYhlit+GM1eiJmRxSmkqbXZLGONVijTIQvSKbV4849ss/Y6jEsddnEcz/yPPcSyndZnvzjgvZtU=
+  file:
+  - exec-in-net_linux_amd64
+  - exec-in-net_linux_arm
+  on:
+    repo: PouuleT/exec-in-net
