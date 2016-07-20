@@ -189,6 +189,7 @@ func execCmd(cmdString string) error {
 		return err
 	}
 	defer stdoutReader.Close()
+
 	stderrReader, err := cmd.StderrPipe()
 	if err != nil {
 		return err
@@ -203,8 +204,8 @@ func execCmd(cmdString string) error {
 	log.Debugf("Command output:\n")
 
 	// write the result
-	io.Copy(os.Stderr, stderrReader)
-	io.Copy(os.Stdout, stdoutReader)
+	go io.Copy(os.Stdout, stdoutReader)
+	go io.Copy(os.Stderr, stderrReader)
 
 	if err := cmd.Wait(); err != nil {
 		return err
