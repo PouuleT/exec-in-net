@@ -17,7 +17,7 @@ import (
 	"github.com/vishvananda/netns"
 )
 
-var ip, command, gateway, intf, logLevel string
+var ip, command, gateway, intf, logLevel, nsPath string
 var log = logrus.New()
 
 func init() {
@@ -26,6 +26,12 @@ func init() {
 	flag.StringVar(&command, "command", "ip route", "command to be executed")
 	flag.StringVar(&gateway, "gw", "", "gateway of the request")
 	flag.StringVar(&logLevel, "log-level", "info", "min level of logs to print")
+	flag.StringVar(
+		&nsPath,
+		"ns-path",
+		fmt.Sprintf("/var/run/netns/w000t%d", os.Getpid()),
+		"path of the temporary namespace to be created, default will be /var/run/netns/w000t$PID",
+	)
 	flag.Parse()
 }
 
@@ -254,7 +260,7 @@ func newNS() (*netns.NsHandle, error) {
 	}
 
 	src := fmt.Sprintf("/proc/%d/ns/net", pid)
-	target := getNsName()
+	target := nsPath
 
 	log.Debugf("Create file %s", target)
 	// Create an empty file
@@ -290,7 +296,7 @@ func deleteNS(ns *netns.NsHandle) error {
 	}
 
 	// Unmount the named namespace
-	target := getNsName()
+	target := nsPath
 
 	log.Debugf("Unmounting %s", target)
 	if err := syscall.Unmount(target, 0); err != nil {
