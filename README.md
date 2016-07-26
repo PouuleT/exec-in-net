@@ -18,6 +18,8 @@
       IP network from where the command will be executed (default "192.168.1.11/24")
   -log-level string
       min level of logs to print (default "info")
+  -mac string
+      mac address of the interface inside the namespace (default will be a random one)
   -ns-path string
       path of the temporary namespace to be created (default "/var/run/netns/w000t$PID")
 
