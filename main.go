@@ -24,13 +24,13 @@ func init() {
 	flag.StringVar(&ip, "ip", "192.168.1.11/24", "IP network from where the command will be executed")
 	flag.StringVar(&intf, "interface", "eth0", "interface used to get out of the network")
 	flag.StringVar(&command, "command", "ip route", "command to be executed")
-	flag.StringVar(&gateway, "gw", "", "gateway of the request")
+	flag.StringVar(&gateway, "gw", "", "gateway of the request (default will be the default route of the given interface)")
 	flag.StringVar(&logLevel, "log-level", "info", "min level of logs to print")
 	flag.StringVar(
 		&nsPath,
 		"ns-path",
-		fmt.Sprintf("/var/run/netns/w000t%d", os.Getpid()),
-		"path of the temporary namespace to be created, default will be /var/run/netns/w000t$PID",
+		"",
+		"path of the temporary namespace to be created (default will be /var/run/netns/w000t$PID)",
 	)
 	flag.Parse()
 }
@@ -74,6 +74,33 @@ func main() {
 		return
 	}
 	log.Debugf("%s : %+v", intf, eth.Attrs().Flags)
+
+	// If no nsPath is given, we'll use one named like
+	// /var/run/netns/w000t$PID
+	if nsPath == "" {
+		nsPath = fmt.Sprintf("/var/run/netns/w000t%d", os.Getpid())
+	}
+
+	// If no gateway is specified, we'll use the first route of the given interface
+	if gateway == "" {
+		routes, err := netlink.RouteList(eth, netlink.FAMILY_V4)
+		if err != nil {
+			log.Warn("Failed to get the route of the interface: ", err)
+			return
+		}
+
+		for _, r := range routes {
+			if r.Gw != nil {
+				gateway = r.Gw.String()
+				break
+			}
+		}
+		if gateway == "" {
+			log.Warnf("Couldn't find a default gateway for the specified interface")
+			return
+		}
+	}
+	gwaddr := net.ParseIP(gateway)
 
 	// ============================== Create the macVLAN
 
@@ -156,7 +183,6 @@ func main() {
 		log.Warn("Failed to add the IP to the macVlan: ", err)
 		return
 	}
-	gwaddr := net.ParseIP(gateway)
 
 	log.Debug("Set the macVlan interface UP")
 	// ============================= Set the link up in the namespace

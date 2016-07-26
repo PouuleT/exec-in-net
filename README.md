@@ -11,7 +11,7 @@
   -command string
       command to be executed (default "ip route")
   -gw string
-      gateway of the network
+      gateway of the network (default will be the default route of the given interface)
   -interface string
       interface used to get out of the network (default "eth0")
   -ip string
