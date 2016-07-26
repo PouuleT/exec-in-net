@@ -17,7 +17,7 @@ import (
 	"github.com/vishvananda/netns"
 )
 
-var ip, command, gateway, intf, logLevel, nsPath string
+var ip, command, gateway, intf, logLevel, nsPath, mac string
 var log = logrus.New()
 
 func init() {
@@ -26,6 +26,7 @@ func init() {
 	flag.StringVar(&command, "command", "ip route", "command to be executed")
 	flag.StringVar(&gateway, "gw", "", "gateway of the request (default will be the default route of the given interface)")
 	flag.StringVar(&logLevel, "log-level", "info", "min level of logs to print")
+	flag.StringVar(&mac, "mac", "", "mac address of the interface inside the namespace (default will be a random one)")
 	flag.StringVar(
 		&nsPath,
 		"ns-path",
@@ -120,18 +121,27 @@ func main() {
 		return
 	}
 
-	err = netlink.LinkSetDown(macVlan)
-	if err != nil {
-		log.Warn("Error while setting macVlan down: ", err)
-		return
-	}
-
 	link, err := netlink.LinkByName("peth0")
 	if err != nil {
 		log.Warn("Error while getting macVlan: ", err)
 		return
 	}
 	log.Debugf("MacVlan created : %+v", link)
+
+	// If a mac was specified, set it now
+	if mac != "" {
+		log.Debugf("Setting macVlan with specified MAC : %s", mac)
+		hardwareAddr, err := net.ParseMAC(mac)
+		if err != nil {
+			log.Warn("Error while parsing given mac: ", err)
+			return
+		}
+		err = netlink.LinkSetHardwareAddr(link, hardwareAddr)
+		if err != nil {
+			log.Warn("Error while setting given mac on macVlan: ", err)
+			return
+		}
+	}
 
 	// ============================== Create the new Namespace
 
