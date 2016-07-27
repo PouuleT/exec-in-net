@@ -18,6 +18,8 @@ import (
 )
 
 var ip, command, gateway, intf, logLevel, nsPath, mac string
+var latency, jitter uint
+var loss float64
 var log = logrus.New()
 
 func init() {
@@ -27,6 +29,9 @@ func init() {
 	flag.StringVar(&gateway, "gw", "", "gateway of the request (default will be the default route of the given interface)")
 	flag.StringVar(&logLevel, "log-level", "info", "min level of logs to print")
 	flag.StringVar(&mac, "mac", "", "mac address of the interface inside the namespace (default will be a random one)")
+	flag.UintVar(&latency, "latency", 0, "latency added on the interface in ms")
+	flag.UintVar(&jitter, "jitter", 0, "jitter added on the interface in ms")
+	flag.Float64Var(&loss, "loss", 0, "loss added on the interface in percentage")
 	flag.StringVar(
 		&nsPath,
 		"ns-path",
@@ -200,6 +205,28 @@ func main() {
 	if err != nil {
 		log.Warn("Error while setting up the interface peth0: ", err)
 		return
+	}
+
+	// Check if we need to add Qdisc attributes
+	if latency != 0 || jitter != 0 || loss != 0 {
+		log.Debugf("Add TC : latency %d ms | jitter %d ms | loss %f", latency*1000, jitter*1000, loss)
+		netem := netlink.NetemQdiscAttrs{
+			Latency: uint32(latency) * 1000,
+			Jitter:  uint32(jitter) * 1000,
+			Loss:    float32(loss),
+		}
+		qdisc := netlink.NewNetem(
+			netlink.QdiscAttrs{
+				LinkIndex: link.Attrs().Index,
+				Parent:    netlink.HANDLE_ROOT,
+			},
+			netem,
+		)
+		err = netlink.QdiscAdd(qdisc)
+		if err != nil {
+			log.Warn("Error while setting qdisc on macVlan: ", err)
+			return
+		}
 	}
 
 	log.Debugf("Set %s as the route", gwaddr)
