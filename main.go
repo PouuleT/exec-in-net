@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
 	"syscall"
@@ -265,36 +265,117 @@ func execCmd(cmdString string) error {
 		return fmt.Errorf("no cmd given")
 	}
 
+	// Get the current working directory
+	pwd, err := os.Getwd()
+	if err != nil {
+		log.Warnf("couldn't get current dir")
+		return err
+	}
+
+	// Lookup the full path of the binary to be executed
+	bin, err := exec.LookPath(cmdElmnts[0])
+	if err != nil {
+		log.Warnf("Failed to find bin %s", cmdElmnts[0])
+		return err
+	}
+
+	// stdin := os.Stdin
+	// stdout := os.Stdout
+	// stderr := os.Stderr
+	// defer stdin.Close()
+	// defer stdout.Close()
+	// defer stderr.Close()
+
+	// Pass stdin / stdout / stderr as proc attributes
+	procAttr := os.ProcAttr{
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
+		// Files: []*os.File{stdin, stdout, stderr},
+		Dir: pwd,
+	}
+
+	args := []string{""}
+	if len(cmdElmnts[1:]) > 0 {
+		args = cmdElmnts[1:]
+	}
+
+	log.Debugf("Going to run `%s %s`", bin, strings.Join(args, " "))
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	signal.Notify(c, syscall.SIGTERM)
+
+	// Start the process
+	proc, err := os.StartProcess(bin, args, &procAttr)
+	if err != nil {
+		log.Warnf("Failed to start process")
+		return err
+	}
+
+	go func() {
+		<-c
+		err := proc.Kill()
+		if err != nil {
+			log.Warnf("error while killing proc", err)
+		}
+		os.Exit(1)
+	}()
+
+	// Wait until the end
+	state, err := proc.Wait()
+	if err != nil {
+		log.Warnf("Error while waiting for proc")
+		return err
+	}
+
+	log.Infof("Result : ", state)
+
 	// Create the command obj
-	cmd := exec.Command(cmdElmnts[0], cmdElmnts[1:]...)
+	// cmd := exec.Command(cmdElmnts[0], cmdElmnts[1:]...)
 
 	// Get a reader for stdout and stderr
-	stdoutReader, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	defer stdoutReader.Close()
+	// stdoutReader, err := cmd.StdoutPipe()
+	// if err != nil {
+	// 	return err
+	// }
+	// defer stdoutReader.Close()
+	//
+	// stderrReader, err := cmd.StderrPipe()
+	// if err != nil {
+	// 	return err
+	// }
+	// defer stderrReader.Close()
 
-	stderrReader, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-	defer stderrReader.Close()
+	// // Get a reader for stdin
+	// stdinWriter, err := cmd.StdinPipe()
+	// if err != nil {
+	// 	return err
+	// }
+	// defer stdinWriter.Close()
+
+	// reader := bufio.NewReader(os.Stdin)
 
 	// Start the command
-	if err := cmd.Start(); err != nil {
-		return err
-	}
+	// if err := cmd.Start(); err != nil {
+	// 	return err
+	// }
 
-	log.Debugf("Command output:\n")
+	// log.Debugf("Command output:\n")
 
-	// write the result
-	go io.Copy(os.Stdout, stdoutReader)
-	go io.Copy(os.Stderr, stderrReader)
+	// // write the result
+	// go func() {
+	// 	io.Copy(os.Stdout, stdoutReader)
+	// 	log.Infof("stdout copy is over")
+	// 	return
+	// }()
+	// go func() {
+	// 	io.Copy(os.Stderr, stderrReader)
+	// 	log.Infof("stderr copy is over")
+	// 	return
+	// }()
 
-	if err := cmd.Wait(); err != nil {
-		return err
-	}
+	// if err := cmd.Wait(); err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
