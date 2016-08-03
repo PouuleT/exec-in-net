@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
 	"syscall"
@@ -21,6 +20,8 @@ var ip, command, gateway, intf, logLevel, nsPath, mac string
 var latency, jitter uint
 var loss float64
 var log = logrus.New()
+var namespace, origns *netns.NsHandle
+var proc *os.Process
 
 func init() {
 	flag.StringVar(&ip, "ip", "192.168.1.11/24", "IP network from where the command will be executed")
@@ -60,7 +61,7 @@ func main() {
 	defer runtime.UnlockOSThread()
 
 	// Save the current network namespace
-	origns, err := netns.Get()
+	origns, err = getOriginalNS()
 	if err != nil {
 		log.Warn("panic when getting netns: ", err)
 		return
@@ -150,16 +151,16 @@ func main() {
 
 	// ============================== Create the new Namespace
 
-	newns, err := newNS()
+	namespace, err = newNS()
 	if err != nil {
 		log.Warn("error while creating new NS: ", err)
 		return
 	}
-	defer deleteNS(newns)
+	defer deleteNS(namespace)
 
 	log.Debug("Go back to original NS")
 
-	err = netns.Set(origns)
+	err = netns.Set(*origns)
 	if err != nil {
 		log.Warn("Failed to change the namespace: ", err)
 		return
@@ -169,7 +170,7 @@ func main() {
 
 	log.Debug("Set the link in the NS")
 
-	if err := netlink.LinkSetNsFd(link, int(*newns)); err != nil {
+	if err := netlink.LinkSetNsFd(link, int(*namespace)); err != nil {
 		log.Warn("Could not attach to Network namespace: ", err)
 		return
 	}
@@ -177,7 +178,7 @@ func main() {
 
 	log.Debug("Enter the namespace")
 
-	err = netns.Set(*newns)
+	err = netns.Set(*namespace)
 	if err != nil {
 		log.Warn("Failed to enter the namespace: ", err)
 		return
@@ -192,7 +193,9 @@ func main() {
 	}
 
 	log.Debugf("Add the addr to the macVlan: %+v", addr)
+
 	// ============================= Set the address in the namespace
+
 	err = netlink.AddrAdd(link, addr)
 	if err != nil {
 		log.Warn("Failed to add the IP to the macVlan: ", err)
@@ -200,7 +203,9 @@ func main() {
 	}
 
 	log.Debug("Set the macVlan interface UP")
+
 	// ============================= Set the link up in the namespace
+
 	err = netlink.LinkSetUp(link)
 	if err != nil {
 		log.Warn("Error while setting up the interface peth0: ", err)
@@ -230,7 +235,9 @@ func main() {
 	}
 
 	log.Debugf("Set %s as the route", gwaddr)
+
 	// ============================= Set the default route in the namespace
+
 	err = netlink.RouteAdd(&netlink.Route{
 		Scope:     netlink.SCOPE_UNIVERSE,
 		LinkIndex: link.Attrs().Index,
@@ -242,6 +249,7 @@ func main() {
 	}
 
 	// ============================= Execute the command in the namespace
+
 	err = execCmd(command)
 	if err != nil {
 		log.Warn("Error while running command : ", err)
@@ -249,7 +257,7 @@ func main() {
 
 	log.Debug("Go back to orignal namspace")
 
-	err = netns.Set(origns)
+	err = netns.Set(*origns)
 	if err != nil {
 		log.Warn("Error while going back to the original namespace: ", err)
 		return
@@ -265,56 +273,102 @@ func execCmd(cmdString string) error {
 		return fmt.Errorf("no cmd given")
 	}
 
-	// Create the command obj
-	cmd := exec.Command(cmdElmnts[0], cmdElmnts[1:]...)
-
-	// Get a reader for stdout and stderr
-	stdoutReader, err := cmd.StdoutPipe()
+	// Get the current working directory
+	pwd, err := os.Getwd()
 	if err != nil {
+		log.Warnf("couldn't get current working directory")
 		return err
 	}
-	defer stdoutReader.Close()
 
-	stderrReader, err := cmd.StderrPipe()
+	// Lookup the full path of the binary to be executed
+	bin, err := exec.LookPath(cmdElmnts[0])
 	if err != nil {
-		return err
-	}
-	defer stderrReader.Close()
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
+		log.Warnf("Failed to find bin %s", cmdElmnts[0])
 		return err
 	}
 
-	log.Debugf("Command output:\n")
+	// TODO: There seems to be a problem if a Signal is catched, stdin is not
+	// printed anymore on the terminal. A `reset` is needed
+	stdin := os.Stdin
 
-	// write the result
-	go io.Copy(os.Stdout, stdoutReader)
-	go io.Copy(os.Stderr, stderrReader)
+	// Pass stdin / stdout / stderr as proc attributes
+	procAttr := os.ProcAttr{
+		Files: []*os.File{stdin, os.Stdout, os.Stderr},
+		Dir:   pwd,
+	}
 
-	if err := cmd.Wait(); err != nil {
+	log.Debugf("Going to run `%s ( %s ) %s`", cmdElmnts[0], bin, strings.Join(cmdElmnts[1:], " "))
+
+	// Create a channel that will listen to SIGINT / SIGTERM
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT)
+	signal.Notify(c, syscall.SIGTERM)
+
+	go func() {
+		// Wait for a SIGINT / SIGTERM
+		<-c
+		log.Debugf("Got a SIGINT / SIGTERM")
+
+		// Go back to the original namespace
+		err := netns.Set(*origns)
+		if err != nil {
+			log.Warn("Failed to change the namespace: ", err)
+		}
+		stdin.Close()
+
+		// If there is a process, need to kill it
+		if proc != nil {
+			log.Debugf("Killing the process")
+			err := proc.Kill()
+			if err != nil {
+				log.Warnf("error while killing proc", err)
+			} else {
+				log.Debugf("Killed the process")
+			}
+		} else {
+			log.Debugf("No process to kill")
+		}
+
+		// If there is a namespace, need to delete it
+		if namespace != nil {
+			log.Debugf("Deleting the namespace")
+			err := deleteNS(namespace)
+			if err != nil {
+				log.Warnf("error while deleting namespace", err)
+			} else {
+				log.Debugf("Namespace deleted")
+			}
+		} else {
+			log.Debugf("No namespace to delete")
+		}
+		os.Exit(1)
+	}()
+
+	// Start the process
+	proc, err = os.StartProcess(bin, cmdElmnts, &procAttr)
+	if err != nil {
+		log.Warnf("Failed to start process")
 		return err
 	}
+
+	// Wait until the end
+	state, err := proc.Wait()
+	if err != nil {
+		log.Warnf("Error while waiting for proc")
+		return err
+	}
+
+	log.Debugf("Result : %s", state)
+	stdin.Close()
 
 	return nil
-}
-
-func askAndPrint() {
-	reader := bufio.NewReader(os.Stdin)
-	log.Debug("===================================================")
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		log.Panic("panic when getting interfaces", err)
-	}
-	log.Debug("Got the interfaces :", ifaces)
-	log.Debug("===================================================")
-	reader.ReadString('\n')
 }
 
 // newNS will create a new named namespace
 func newNS() (*netns.NsHandle, error) {
 	pid := os.Getpid()
 
+	// Create a new network namespace
 	log.Debug("Create a new ns")
 	newns, err := netns.New()
 	if err != nil {
@@ -349,6 +403,16 @@ func newNS() (*netns.NsHandle, error) {
 	return &newns, nil
 }
 
+func getOriginalNS() (*netns.NsHandle, error) {
+	// Save the current network namespace
+	origns, err := netns.Get()
+	if err != nil {
+		log.Warn("panic when getting netns: ", err)
+		return nil, err
+	}
+	return &origns, nil
+}
+
 // deleteNS will delete the given namespace
 func deleteNS(ns *netns.NsHandle) error {
 	// Close the nsHandler
@@ -358,9 +422,9 @@ func deleteNS(ns *netns.NsHandle) error {
 		return err
 	}
 
-	// Unmount the named namespace
 	target := nsPath
 
+	// Unmount the named namespace
 	log.Debugf("Unmounting %s", target)
 	if err := syscall.Unmount(target, 0); err != nil {
 		log.Warnf("Error while unmounting %s : %s", target, err)
@@ -380,21 +444,26 @@ func deleteNS(ns *netns.NsHandle) error {
 // setupNetnsDir check that /run/netns directory is already mounted
 func setupNetnsDir() error {
 	netnsPath := "/run/netns"
+	// Check if the directory /run/netns exists
 	_, err := os.Stat(netnsPath)
 	if err == nil {
 		return nil
 	}
+	// Check if the error is 'no such file'
 	if !os.IsNotExist(err) {
 		return err
 	}
+
 	log.Debugf("/run/netns doesn't exist, need to create it")
 
+	// Creating the netns directory
 	log.Debugf("Creating directory %s", netnsPath)
 	err = os.Mkdir(netnsPath, os.ModePerm)
 	if err != nil {
 		return nil
 	}
 
+	// Mounting the netns directory
 	log.Debugf("Mounting %s", netnsPath)
 	if err := syscall.Mount("tmpfs", netnsPath, "tmpfs", syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV, ""); err != nil {
 		return err
