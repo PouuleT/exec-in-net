@@ -263,7 +263,7 @@ func main() {
 		return
 	}
 
-	log.Debug("Cleaning ...")
+	log.Debug("Exiting properly ...")
 }
 
 func execCmd(cmdString string) error {
@@ -328,20 +328,6 @@ func execCmd(cmdString string) error {
 		} else {
 			log.Debugf("No process to kill")
 		}
-
-		// If there is a namespace, need to delete it
-		if namespace != nil {
-			log.Debugf("Deleting the namespace")
-			err := deleteNS(namespace)
-			if err != nil {
-				log.Warnf("error while deleting namespace", err)
-			} else {
-				log.Debugf("Namespace deleted")
-			}
-		} else {
-			log.Debugf("No namespace to delete")
-		}
-		os.Exit(1)
 	}()
 
 	// Start the process
@@ -415,6 +401,8 @@ func getOriginalNS() (*netns.NsHandle, error) {
 
 // deleteNS will delete the given namespace
 func deleteNS(ns *netns.NsHandle) error {
+	log.Debugf("Deleting namespace")
+
 	// Close the nsHandler
 	err := ns.Close()
 	if err != nil {
