@@ -287,14 +287,13 @@ func execCmd(cmdString string) error {
 		return err
 	}
 
-	// TODO: There seems to be a problem if a Signal is catched, stdin is not
-	// printed anymore on the terminal. A `reset` is needed
-	stdin := os.Stdin
-
 	// Pass stdin / stdout / stderr as proc attributes
 	procAttr := os.ProcAttr{
-		Files: []*os.File{stdin, os.Stdout, os.Stderr},
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 		Dir:   pwd,
+		Sys: &syscall.SysProcAttr{
+			Setpgid: true,
+		},
 	}
 
 	log.Debugf("Going to run `%s ( %s ) %s`", cmdElmnts[0], bin, strings.Join(cmdElmnts[1:], " "))
@@ -314,7 +313,6 @@ func execCmd(cmdString string) error {
 		if err != nil {
 			log.Warn("Failed to change the namespace: ", err)
 		}
-		stdin.Close()
 
 		// If there is a process, need to kill it
 		if proc != nil {
@@ -345,7 +343,6 @@ func execCmd(cmdString string) error {
 	}
 
 	log.Debugf("Result : %s", state)
-	stdin.Close()
 
 	return nil
 }
