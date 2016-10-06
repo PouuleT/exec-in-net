@@ -22,6 +22,7 @@ var loss float64
 var log = logrus.New()
 var namespace, origns *netns.NsHandle
 var proc *os.Process
+var done = make(chan struct{})
 
 func init() {
 	flag.StringVar(&ip, "ip", "192.168.1.11/24", "IP network from where the command will be executed")
@@ -250,9 +251,31 @@ func main() {
 
 	// ============================= Execute the command in the namespace
 
-	err = execCmd(command)
-	if err != nil {
-		log.Warn("Error while running command : ", err)
+	// Create a channel that will listen to SIGINT / SIGTERM
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT)
+	signal.Notify(c, syscall.SIGTERM)
+
+	go func() {
+		err = execCmd(command)
+		if err != nil {
+			log.Warn("Error while running command : ", err)
+		}
+		done <- struct{}{}
+	}()
+
+	// Wait for the process to end
+FOR_LOOP:
+	for {
+		select {
+		// If we recieve a signal, we let it flow to the process
+		case signal := <-c:
+			log.Debugf("Got a %s", signal.String())
+		// If the process is done, we exit properly
+		case <-done:
+			log.Debugf("Process exited properly, exiting")
+			break FOR_LOOP
+		}
 	}
 
 	log.Debug("Go back to orignal namspace")
@@ -291,42 +314,9 @@ func execCmd(cmdString string) error {
 	procAttr := os.ProcAttr{
 		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 		Dir:   pwd,
-		Sys: &syscall.SysProcAttr{
-			Setpgid: true,
-		},
 	}
 
 	log.Debugf("Going to run `%s ( %s ) %s`", cmdElmnts[0], bin, strings.Join(cmdElmnts[1:], " "))
-
-	// Create a channel that will listen to SIGINT / SIGTERM
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT)
-	signal.Notify(c, syscall.SIGTERM)
-
-	go func() {
-		// Wait for a SIGINT / SIGTERM
-		<-c
-		log.Debugf("Got a SIGINT / SIGTERM")
-
-		// Go back to the original namespace
-		err := netns.Set(*origns)
-		if err != nil {
-			log.Warn("Failed to change the namespace: ", err)
-		}
-
-		// If there is a process, need to kill it
-		if proc != nil {
-			log.Debugf("Killing the process")
-			err := proc.Kill()
-			if err != nil {
-				log.Warnf("error while killing proc", err)
-			} else {
-				log.Debugf("Killed the process")
-			}
-		} else {
-			log.Debugf("No process to kill")
-		}
-	}()
 
 	// Start the process
 	proc, err = os.StartProcess(bin, cmdElmnts, &procAttr)
