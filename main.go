@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"runtime"
-	"strings"
 	"syscall"
 
 	"github.com/Sirupsen/logrus"
@@ -23,8 +21,13 @@ var log = logrus.New()
 var namespace, origns *netns.NsHandle
 var proc *os.Process
 var done = make(chan struct{})
+var err error
+var eth netlink.Link
+var gwaddr net.IP
+var addr *netlink.Addr
 
 func init() {
+
 	flag.StringVar(&ip, "ip", "192.168.1.11/24", "IP network from where the command will be executed")
 	flag.StringVar(&intf, "interface", "eth0", "interface used to get out of the network")
 	flag.StringVar(&command, "command", "ip route", "command to be executed")
@@ -41,9 +44,38 @@ func init() {
 		"path of the temporary namespace to be created (default will be /var/run/netns/w000t$PID)",
 	)
 	flag.Parse()
+
 }
 
-func main() {
+func newMacVLAN() (*netlink.Link, error) {
+	macVlan := &netlink.Macvlan{
+		LinkAttrs: netlink.LinkAttrs{
+			Name:        "peth0",
+			ParentIndex: eth.Attrs().Index,
+			TxQLen:      -1,
+		},
+		Mode: netlink.MACVLAN_MODE_BRIDGE,
+	}
+	// Creat the macVLAN
+	err = netlink.LinkAdd(macVlan)
+	if err != nil {
+		log.Warn("Error while creating macVlan: ", err)
+		return nil, err
+	}
+
+	// Retrieve the newly created macVLAN
+	link, err := netlink.LinkByName("peth0")
+	if err != nil {
+		log.Warn("Error while getting macVlan: ", err)
+		return nil, err
+	}
+	log.Debugf("MacVlan created : %+v", link)
+
+	return &link, err
+}
+
+func initVar() {
+
 	lvl, err := logrus.ParseLevel(logLevel)
 	if err != nil {
 		logrus.Errorf("invalid log level %q: %q", logLevel, err)
@@ -57,18 +89,6 @@ func main() {
 		FullTimestamp: true,
 	}
 
-	// Lock the OS Thread so we don't accidentally switch namespaces
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	// Save the current network namespace
-	origns, err = getOriginalNS()
-	if err != nil {
-		log.Warn("panic when getting netns: ", err)
-		return
-	}
-	defer origns.Close()
-
 	// Check the /run/netns mount
 	err = setupNetnsDir()
 	if err != nil {
@@ -76,7 +96,7 @@ func main() {
 		return
 	}
 
-	eth, err := netlink.LinkByName(intf)
+	eth, err = netlink.LinkByName(intf)
 	if err != nil {
 		log.Warnf("Error while getting %s : %s", intf, err)
 		return
@@ -108,46 +128,67 @@ func main() {
 			return
 		}
 	}
-	gwaddr := net.ParseIP(gateway)
+	gwaddr = net.ParseIP(gateway)
 
-	// ============================== Create the macVLAN
-
-	log.Debug("Create a new macVlan")
-
-	macVlan := &netlink.Macvlan{
-		LinkAttrs: netlink.LinkAttrs{
-			Name:        "peth0",
-			ParentIndex: eth.Attrs().Index,
-			TxQLen:      -1,
-		},
-		Mode: netlink.MACVLAN_MODE_BRIDGE,
-	}
-	err = netlink.LinkAdd(macVlan)
+	addr, err = netlink.ParseAddr(ip)
 	if err != nil {
-		log.Warn("Error while creating macVlan: ", err)
+		log.Warn("Failed to parse the given IP: ", err)
 		return
 	}
+	return
+}
 
-	link, err := netlink.LinkByName("peth0")
-	if err != nil {
-		log.Warn("Error while getting macVlan: ", err)
-		return
-	}
-	log.Debugf("MacVlan created : %+v", link)
-
+func setMacVlanMacAddr(link *netlink.Link) error {
 	// If a mac was specified, set it now
 	if mac != "" {
 		log.Debugf("Setting macVlan with specified MAC : %s", mac)
 		hardwareAddr, err := net.ParseMAC(mac)
 		if err != nil {
 			log.Warn("Error while parsing given mac: ", err)
-			return
+			return err
 		}
-		err = netlink.LinkSetHardwareAddr(link, hardwareAddr)
+		err = netlink.LinkSetHardwareAddr(*link, hardwareAddr)
 		if err != nil {
 			log.Warn("Error while setting given mac on macVlan: ", err)
-			return
+			return err
 		}
+	}
+	return nil
+}
+
+func main() {
+	// Lock the OS Thread so we don't accidentally switch namespaces
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// Get the current network namespace
+	origns, err = getOriginalNS()
+	if err != nil {
+		panic(fmt.Sprintf("panic when getting netns: %s", err))
+	}
+	defer origns.Close()
+
+	log.Println("Got original ns : ", int(*origns))
+
+	// Init de main variables
+	initVar()
+
+	// ============================== Create the macVLAN
+
+	log.Debug("Create a new macVlan")
+	log.Println("Got original ns : ", int(*origns))
+
+	// Create the new macVlan interface
+	link, err := newMacVLAN()
+	if err != nil {
+		log.Warn("Error while creating macVlan: ", err)
+		return
+	}
+
+	err = setMacVlanMacAddr(link)
+	if err != nil {
+		log.Warn("Error while setting vlan mac: ", err)
+		return
 	}
 
 	// ============================== Create the new Namespace
@@ -159,7 +200,7 @@ func main() {
 	}
 	defer deleteNS(namespace)
 
-	log.Debug("Go back to original NS")
+	log.Debug("Go back to original NS : ", int(*origns))
 
 	err = netns.Set(*origns)
 	if err != nil {
@@ -171,7 +212,7 @@ func main() {
 
 	log.Debug("Set the link in the NS")
 
-	if err := netlink.LinkSetNsFd(link, int(*namespace)); err != nil {
+	if err := netlink.LinkSetNsFd(*link, int(*namespace)); err != nil {
 		log.Warn("Could not attach to Network namespace: ", err)
 		return
 	}
@@ -187,17 +228,11 @@ func main() {
 
 	// ============================= Configure the new namespace to configure it
 
-	addr, err := netlink.ParseAddr(ip)
-	if err != nil {
-		log.Warn("Failed to parse the given IP: ", err)
-		return
-	}
-
 	log.Debugf("Add the addr to the macVlan: %+v", addr)
 
 	// ============================= Set the address in the namespace
 
-	err = netlink.AddrAdd(link, addr)
+	err = netlink.AddrAdd(*link, addr)
 	if err != nil {
 		log.Warn("Failed to add the IP to the macVlan: ", err)
 		return
@@ -207,7 +242,7 @@ func main() {
 
 	// ============================= Set the link up in the namespace
 
-	err = netlink.LinkSetUp(link)
+	err = netlink.LinkSetUp(*link)
 	if err != nil {
 		log.Warn("Error while setting up the interface peth0: ", err)
 		return
@@ -223,7 +258,7 @@ func main() {
 		}
 		qdisc := netlink.NewNetem(
 			netlink.QdiscAttrs{
-				LinkIndex: link.Attrs().Index,
+				LinkIndex: (*link).Attrs().Index,
 				Parent:    netlink.HANDLE_ROOT,
 			},
 			netem,
@@ -241,7 +276,7 @@ func main() {
 
 	err = netlink.RouteAdd(&netlink.Route{
 		Scope:     netlink.SCOPE_UNIVERSE,
-		LinkIndex: link.Attrs().Index,
+		LinkIndex: (*link).Attrs().Index,
 		Gw:        gwaddr,
 	})
 	if err != nil {
@@ -287,161 +322,4 @@ FOR_LOOP:
 	}
 
 	log.Debug("Exiting properly ...")
-}
-
-func execCmd(cmdString string) error {
-	// Parse the command to execute it
-	cmdElmnts := strings.Split(cmdString, " ")
-	if len(cmdElmnts) == 0 {
-		return fmt.Errorf("no cmd given")
-	}
-
-	// Get the current working directory
-	pwd, err := os.Getwd()
-	if err != nil {
-		log.Warnf("couldn't get current working directory")
-		return err
-	}
-
-	// Lookup the full path of the binary to be executed
-	bin, err := exec.LookPath(cmdElmnts[0])
-	if err != nil {
-		log.Warnf("Failed to find bin %s", cmdElmnts[0])
-		return err
-	}
-
-	// Pass stdin / stdout / stderr as proc attributes
-	procAttr := os.ProcAttr{
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-		Dir:   pwd,
-	}
-
-	log.Debugf("Going to run `%s ( %s ) %s`", cmdElmnts[0], bin, strings.Join(cmdElmnts[1:], " "))
-
-	// Start the process
-	proc, err = os.StartProcess(bin, cmdElmnts, &procAttr)
-	if err != nil {
-		log.Warnf("Failed to start process")
-		return err
-	}
-
-	// Wait until the end
-	state, err := proc.Wait()
-	if err != nil {
-		log.Warnf("Error while waiting for proc")
-		return err
-	}
-
-	log.Debugf("Result : %s", state)
-
-	return nil
-}
-
-// newNS will create a new named namespace
-func newNS() (*netns.NsHandle, error) {
-	pid := os.Getpid()
-
-	// Create a new network namespace
-	log.Debug("Create a new ns")
-	newns, err := netns.New()
-	if err != nil {
-		log.Warn(err)
-		return nil, err
-	}
-
-	src := fmt.Sprintf("/proc/%d/ns/net", pid)
-	target := nsPath
-
-	log.Debugf("Create file %s", target)
-	// Create an empty file
-	file, err := os.Create(target)
-	if err != nil {
-		log.Warn(err)
-		return nil, err
-	}
-	// And close it
-	err = file.Close()
-	if err != nil {
-		log.Warn(err)
-		return nil, err
-	}
-
-	log.Debugf("Mount %s", target)
-
-	// Mount the namespace in /var/run/netns so it becomes a named namespace
-	if err := syscall.Mount(src, target, "proc", syscall.MS_BIND|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV, ""); err != nil {
-		return nil, err
-	}
-
-	return &newns, nil
-}
-
-func getOriginalNS() (*netns.NsHandle, error) {
-	// Save the current network namespace
-	origns, err := netns.Get()
-	if err != nil {
-		log.Warn("panic when getting netns: ", err)
-		return nil, err
-	}
-	return &origns, nil
-}
-
-// deleteNS will delete the given namespace
-func deleteNS(ns *netns.NsHandle) error {
-	log.Debugf("Deleting namespace")
-
-	// Close the nsHandler
-	err := ns.Close()
-	if err != nil {
-		log.Warn("Error while closing the namespace: ", err)
-		return err
-	}
-
-	target := nsPath
-
-	// Unmount the named namespace
-	log.Debugf("Unmounting %s", target)
-	if err := syscall.Unmount(target, 0); err != nil {
-		log.Warnf("Error while unmounting %s : %s", target, err)
-		return err
-	}
-
-	// Delete the namespace file
-	log.Debugf("Deleting %s", target)
-	if err := os.Remove(target); err != nil {
-		log.Warn("Error while deleting %s : %s", target, err)
-		return err
-	}
-
-	return nil
-}
-
-// setupNetnsDir check that /run/netns directory is already mounted
-func setupNetnsDir() error {
-	netnsPath := "/run/netns"
-	// Check if the directory /run/netns exists
-	_, err := os.Stat(netnsPath)
-	if err == nil {
-		return nil
-	}
-	// Check if the error is 'no such file'
-	if !os.IsNotExist(err) {
-		return err
-	}
-
-	log.Debugf("/run/netns doesn't exist, need to create it")
-
-	// Creating the netns directory
-	log.Debugf("Creating directory %s", netnsPath)
-	err = os.Mkdir(netnsPath, os.ModePerm)
-	if err != nil {
-		return nil
-	}
-
-	// Mounting the netns directory
-	log.Debugf("Mounting %s", netnsPath)
-	if err := syscall.Mount("tmpfs", netnsPath, "tmpfs", syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV, ""); err != nil {
-		return err
-	}
-	return nil
 }
