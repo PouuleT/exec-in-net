@@ -27,7 +27,6 @@ var gwaddr net.IP
 var addr *netlink.Addr
 
 func init() {
-
 	flag.StringVar(&ip, "ip", "192.168.1.11/24", "IP network from where the command will be executed")
 	flag.StringVar(&intf, "interface", "eth0", "interface used to get out of the network")
 	flag.StringVar(&command, "command", "ip route", "command to be executed")
@@ -44,7 +43,31 @@ func init() {
 		"path of the temporary namespace to be created (default will be /var/run/netns/w000t$PID)",
 	)
 	flag.Parse()
+}
 
+func setTcAttributes(link *netlink.Link) error {
+	// Check if we need to add Qdisc attributes
+	if latency != 0 || jitter != 0 || loss != 0 {
+		log.Debugf("Add TC : latency %d ms | jitter %d ms | loss %f", latency*1000, jitter*1000, loss)
+		netem := netlink.NetemQdiscAttrs{
+			Latency: uint32(latency) * 1000,
+			Jitter:  uint32(jitter) * 1000,
+			Loss:    float32(loss),
+		}
+		qdisc := netlink.NewNetem(
+			netlink.QdiscAttrs{
+				LinkIndex: (*link).Attrs().Index,
+				Parent:    netlink.HANDLE_ROOT,
+			},
+			netem,
+		)
+		err = netlink.QdiscAdd(qdisc)
+		if err != nil {
+			log.Warn("Error while setting qdisc on macVlan: ", err)
+			return err
+		}
+	}
+	return nil
 }
 
 func newMacVLAN() (*netlink.Link, error) {
@@ -138,6 +161,14 @@ func initVar() {
 	return
 }
 
+func setLinkRoute(link *netlink.Link) error {
+	return netlink.RouteAdd(&netlink.Route{
+		Scope:     netlink.SCOPE_UNIVERSE,
+		LinkIndex: (*link).Attrs().Index,
+		Gw:        gwaddr,
+	})
+}
+
 func setMacVlanMacAddr(link *netlink.Link) error {
 	// If a mac was specified, set it now
 	if mac != "" {
@@ -168,15 +199,12 @@ func main() {
 	}
 	defer origns.Close()
 
-	log.Println("Got original ns : ", int(*origns))
-
 	// Init de main variables
 	initVar()
 
 	// ============================== Create the macVLAN
 
 	log.Debug("Create a new macVlan")
-	log.Println("Got original ns : ", int(*origns))
 
 	// Create the new macVlan interface
 	link, err := newMacVLAN()
@@ -184,6 +212,8 @@ func main() {
 		log.Warn("Error while creating macVlan: ", err)
 		return
 	}
+
+	// ============================= Set the mac address to the macVlan interface
 
 	err = setMacVlanMacAddr(link)
 	if err != nil {
@@ -248,42 +278,20 @@ func main() {
 		return
 	}
 
-	// Check if we need to add Qdisc attributes
-	if latency != 0 || jitter != 0 || loss != 0 {
-		log.Debugf("Add TC : latency %d ms | jitter %d ms | loss %f", latency*1000, jitter*1000, loss)
-		netem := netlink.NetemQdiscAttrs{
-			Latency: uint32(latency) * 1000,
-			Jitter:  uint32(jitter) * 1000,
-			Loss:    float32(loss),
-		}
-		qdisc := netlink.NewNetem(
-			netlink.QdiscAttrs{
-				LinkIndex: (*link).Attrs().Index,
-				Parent:    netlink.HANDLE_ROOT,
-			},
-			netem,
-		)
-		err = netlink.QdiscAdd(qdisc)
-		if err != nil {
-			log.Warn("Error while setting qdisc on macVlan: ", err)
-			return
-		}
+	err = setTcAttributes(link)
+	if err != nil {
+		log.Warn("Error while setting up the interface attributes: ", err)
+		return
 	}
-
 	log.Debugf("Set %s as the route", gwaddr)
 
 	// ============================= Set the default route in the namespace
 
-	err = netlink.RouteAdd(&netlink.Route{
-		Scope:     netlink.SCOPE_UNIVERSE,
-		LinkIndex: (*link).Attrs().Index,
-		Gw:        gwaddr,
-	})
+	err = setLinkRoute(link)
 	if err != nil {
-		log.Warn("Error while setting up route on interface peth0 :", err)
+		log.Warn("Error while setting up the interface attributes: ", err)
 		return
 	}
-
 	// ============================= Execute the command in the namespace
 
 	// Create a channel that will listen to SIGINT / SIGTERM
@@ -291,6 +299,7 @@ func main() {
 	signal.Notify(c, syscall.SIGINT)
 	signal.Notify(c, syscall.SIGTERM)
 
+	// Launch the command in a go routine
 	go func() {
 		err = execCmd(command)
 		if err != nil {
