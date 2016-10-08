@@ -27,6 +27,7 @@ var gwaddr net.IP
 var addr *netlink.Addr
 
 func init() {
+	// Parse the arguments
 	flag.StringVar(&ip, "ip", "192.168.1.11/24", "IP network from where the command will be executed")
 	flag.StringVar(&intf, "interface", "eth0", "interface used to get out of the network")
 	flag.StringVar(&command, "command", "ip route", "command to be executed")
@@ -45,64 +46,11 @@ func init() {
 	flag.Parse()
 }
 
-func setTcAttributes(link *netlink.Link) error {
-	// Check if we need to add Qdisc attributes
-	if latency != 0 || jitter != 0 || loss != 0 {
-		log.Debugf("Add TC : latency %d ms | jitter %d ms | loss %f", latency*1000, jitter*1000, loss)
-		netem := netlink.NetemQdiscAttrs{
-			Latency: uint32(latency) * 1000,
-			Jitter:  uint32(jitter) * 1000,
-			Loss:    float32(loss),
-		}
-		qdisc := netlink.NewNetem(
-			netlink.QdiscAttrs{
-				LinkIndex: (*link).Attrs().Index,
-				Parent:    netlink.HANDLE_ROOT,
-			},
-			netem,
-		)
-		err = netlink.QdiscAdd(qdisc)
-		if err != nil {
-			log.Warn("Error while setting qdisc on macVlan: ", err)
-			return err
-		}
-	}
-	return nil
-}
-
-func newMacVLAN() (*netlink.Link, error) {
-	macVlan := &netlink.Macvlan{
-		LinkAttrs: netlink.LinkAttrs{
-			Name:        "peth0",
-			ParentIndex: eth.Attrs().Index,
-			TxQLen:      -1,
-		},
-		Mode: netlink.MACVLAN_MODE_BRIDGE,
-	}
-	// Creat the macVLAN
-	err = netlink.LinkAdd(macVlan)
-	if err != nil {
-		log.Warn("Error while creating macVlan: ", err)
-		return nil, err
-	}
-
-	// Retrieve the newly created macVLAN
-	link, err := netlink.LinkByName("peth0")
-	if err != nil {
-		log.Warn("Error while getting macVlan: ", err)
-		return nil, err
-	}
-	log.Debugf("MacVlan created : %+v", link)
-
-	return &link, err
-}
-
-func initVar() {
-
+func initVar() error {
 	lvl, err := logrus.ParseLevel(logLevel)
 	if err != nil {
 		logrus.Errorf("invalid log level %q: %q", logLevel, err)
-		return
+		return err
 	}
 
 	// Setup the logger
@@ -116,13 +64,14 @@ func initVar() {
 	err = setupNetnsDir()
 	if err != nil {
 		log.Warn("Error setting up netns: ", err)
-		return
+		return err
 	}
 
+	// Get the link
 	eth, err = netlink.LinkByName(intf)
 	if err != nil {
 		log.Warnf("Error while getting %s : %s", intf, err)
-		return
+		return err
 	}
 	log.Debugf("%s : %+v", intf, eth.Attrs().Flags)
 
@@ -134,10 +83,11 @@ func initVar() {
 
 	// If no gateway is specified, we'll use the first route of the given interface
 	if gateway == "" {
+		// Get the routes
 		routes, err := netlink.RouteList(eth, netlink.FAMILY_V4)
 		if err != nil {
 			log.Warn("Failed to get the route of the interface: ", err)
-			return
+			return err
 		}
 
 		for _, r := range routes {
@@ -147,42 +97,16 @@ func initVar() {
 			}
 		}
 		if gateway == "" {
-			log.Warnf("Couldn't find a default gateway for the specified interface")
-			return
+			return fmt.Errorf("Couldn't find a default gateway for the specified interface")
 		}
 	}
 	gwaddr = net.ParseIP(gateway)
 
+	// Parse the IP
 	addr, err = netlink.ParseAddr(ip)
 	if err != nil {
 		log.Warn("Failed to parse the given IP: ", err)
-		return
-	}
-	return
-}
-
-func setLinkRoute(link *netlink.Link) error {
-	return netlink.RouteAdd(&netlink.Route{
-		Scope:     netlink.SCOPE_UNIVERSE,
-		LinkIndex: (*link).Attrs().Index,
-		Gw:        gwaddr,
-	})
-}
-
-func setMacVlanMacAddr(link *netlink.Link) error {
-	// If a mac was specified, set it now
-	if mac != "" {
-		log.Debugf("Setting macVlan with specified MAC : %s", mac)
-		hardwareAddr, err := net.ParseMAC(mac)
-		if err != nil {
-			log.Warn("Error while parsing given mac: ", err)
-			return err
-		}
-		err = netlink.LinkSetHardwareAddr(*link, hardwareAddr)
-		if err != nil {
-			log.Warn("Error while setting given mac on macVlan: ", err)
-			return err
-		}
+		return err
 	}
 	return nil
 }
@@ -200,7 +124,10 @@ func main() {
 	defer origns.Close()
 
 	// Init de main variables
-	initVar()
+	err = initVar()
+	if err != nil {
+		panic(fmt.Sprintf("panic when initializing vars: %s", err))
+	}
 
 	// ============================== Create the macVLAN
 
