@@ -226,28 +226,27 @@ func main() {
 	signal.Notify(c, syscall.SIGINT)
 	signal.Notify(c, syscall.SIGTERM)
 
-	// Launch the command in a go routine
+	// Wait for the process to end
 	go func() {
-		err = execCmd(command)
-		if err != nil {
-			log.Warn("Error while running command : ", err)
+		for {
+			select {
+			// If we recieve a signal, we let it flow to the process
+			case signal := <-c:
+				log.Debugf("Got a %s", signal.String())
+			// If the process is done, we exit properly
+			case <-done:
+				log.Debugf("Process exited properly, exiting")
+				return
+			}
 		}
-		done <- struct{}{}
 	}()
 
-	// Wait for the process to end
-FOR_LOOP:
-	for {
-		select {
-		// If we recieve a signal, we let it flow to the process
-		case signal := <-c:
-			log.Debugf("Got a %s", signal.String())
-		// If the process is done, we exit properly
-		case <-done:
-			log.Debugf("Process exited properly, exiting")
-			break FOR_LOOP
-		}
+	// Launch the command in a go routine
+	err = execCmd(command)
+	if err != nil {
+		log.Warn("Error while running command : ", err)
 	}
+	done <- struct{}{}
 
 	log.Debug("Go back to orignal namspace")
 
