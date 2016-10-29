@@ -8,25 +8,26 @@ import (
 
 func setTcAttributes(link *netlink.Link) error {
 	// Check if we need to add Qdisc attributes
-	if latency != 0 || jitter != 0 || loss != 0 {
-		log.Debugf("Add TC : latency %d ms | jitter %d ms | loss %f", latency*1000, jitter*1000, loss)
-		netem := netlink.NetemQdiscAttrs{
-			Latency: uint32(latency) * 1000,
-			Jitter:  uint32(jitter) * 1000,
-			Loss:    float32(loss),
-		}
-		qdisc := netlink.NewNetem(
-			netlink.QdiscAttrs{
-				LinkIndex: (*link).Attrs().Index,
-				Parent:    netlink.HANDLE_ROOT,
-			},
-			netem,
-		)
-		err = netlink.QdiscAdd(qdisc)
-		if err != nil {
-			log.Warn("Error while setting qdisc on macVlan: ", err)
-			return err
-		}
+	if latency == 0 && jitter == 0 && loss == 0 {
+		return nil
+	}
+	log.Debugf("Add TC : latency %d ms | jitter %d ms | loss %f", latency*1000, jitter*1000, loss)
+	netem := netlink.NetemQdiscAttrs{
+		Latency: uint32(latency) * 1000,
+		Jitter:  uint32(jitter) * 1000,
+		Loss:    float32(loss),
+	}
+	qdisc := netlink.NewNetem(
+		netlink.QdiscAttrs{
+			LinkIndex: (*link).Attrs().Index,
+			Parent:    netlink.HANDLE_ROOT,
+		},
+		netem,
+	)
+	err = netlink.QdiscAdd(qdisc)
+	if err != nil {
+		log.Warn("Error while setting qdisc on macVlan: ", err)
+		return err
 	}
 	return nil
 }
@@ -68,18 +69,19 @@ func setLinkRoute(link *netlink.Link) error {
 
 func setMacVlanMacAddr(link *netlink.Link) error {
 	// If a mac was specified, set it now
-	if mac != "" {
-		log.Debugf("Setting macVlan with specified MAC : %s", mac)
-		hardwareAddr, err := net.ParseMAC(mac)
-		if err != nil {
-			log.Warn("Error while parsing given mac: ", err)
-			return err
-		}
-		err = netlink.LinkSetHardwareAddr(*link, hardwareAddr)
-		if err != nil {
-			log.Warn("Error while setting given mac on macVlan: ", err)
-			return err
-		}
+	if mac == "" {
+		return nil
+	}
+	log.Debugf("Setting macVlan with specified MAC : %s", mac)
+	hardwareAddr, err := net.ParseMAC(mac)
+	if err != nil {
+		log.Warn("Error while parsing given mac: ", err)
+		return err
+	}
+	err = netlink.LinkSetHardwareAddr(*link, hardwareAddr)
+	if err != nil {
+		log.Warn("Error while setting given mac on macVlan: ", err)
+		return err
 	}
 	return nil
 }

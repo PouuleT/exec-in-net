@@ -207,7 +207,7 @@ func main() {
 
 	err = setTcAttributes(link)
 	if err != nil {
-		log.Warn("Error while setting up the interface attributes: ", err)
+		log.Warn("Error while setting up the interface TC attributes: ", err)
 		return
 	}
 	log.Debugf("Set %s as the route", gwaddr)
@@ -216,7 +216,7 @@ func main() {
 
 	err = setLinkRoute(link)
 	if err != nil {
-		log.Warn("Error while setting up the interface attributes: ", err)
+		log.Warn("Error while setting up the interface route: ", err)
 		return
 	}
 	// ============================= Execute the command in the namespace
