@@ -210,7 +210,6 @@ func main() {
 		log.Warn("Error while setting up the interface TC attributes: ", err)
 		return
 	}
-	log.Debugf("Set %s as the route", gwaddr)
 
 	// ============================= Set the default route in the namespace
 

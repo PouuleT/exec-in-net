@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/vishvananda/netlink"
@@ -60,6 +61,25 @@ func newMacVLAN() (*netlink.Link, error) {
 }
 
 func setLinkRoute(link *netlink.Link) error {
+	// Add a route for the gateway
+	_, gwaddrNet, err := net.ParseCIDR(fmt.Sprintf("%s/32", gwaddr.String()))
+	if err != nil {
+		log.Warnf("Error when parsing gateway", err)
+		return err
+	}
+	log.Debug("Setting a route for the gateway")
+	err = netlink.RouteAdd(&netlink.Route{
+		Scope:     netlink.SCOPE_UNIVERSE,
+		LinkIndex: (*link).Attrs().Index,
+		Dst:       gwaddrNet,
+	})
+	if err != nil {
+		log.Warn("Error while setting link route: ", err)
+		return err
+	}
+
+	log.Debugf("Set %s as the default gateway", gwaddr)
+	// Add the default gateway
 	return netlink.RouteAdd(&netlink.Route{
 		Scope:     netlink.SCOPE_UNIVERSE,
 		LinkIndex: (*link).Attrs().Index,
