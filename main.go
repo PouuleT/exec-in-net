@@ -16,6 +16,7 @@ import (
 
 var ip, command, gateway, intf, logLevel, nsPath, mac string
 var latency, jitter uint
+var mtu int
 var loss float64
 var log = logrus.New()
 var namespace, origns *netns.NsHandle
@@ -37,6 +38,7 @@ func init() {
 	flag.UintVar(&latency, "latency", 0, "latency added on the interface in ms")
 	flag.UintVar(&jitter, "jitter", 0, "jitter added on the interface in ms")
 	flag.Float64Var(&loss, "loss", 0, "loss added on the interface in percentage")
+	flag.IntVar(&mtu, "mtu", 0, "MTU of the interface")
 	flag.StringVar(
 		&nsPath,
 		"ns-path",
@@ -145,6 +147,14 @@ func main() {
 	err = setMacVlanMacAddr(link)
 	if err != nil {
 		log.Warn("Error while setting vlan mac: ", err)
+		return
+	}
+
+	// ============================= Set the mtu of the macVlan interface
+
+	err = setMacVlanMTU(link)
+	if err != nil {
+		log.Warn("Error while setting vlan MTU: ", err)
 		return
 	}
 
