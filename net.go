@@ -105,3 +105,17 @@ func setMacVlanMacAddr(link *netlink.Link) error {
 	}
 	return nil
 }
+
+func setMacVlanMTU(link *netlink.Link) error {
+	// If a mtu was specified, set it now
+	if mtu == 0 {
+		return nil
+	}
+	log.Debugf("Setting macVlan with specified MTU : %s", mtu)
+	err = netlink.LinkSetMTU(*link, mtu)
+	if err != nil {
+		log.Warn("Error while setting given mtu on macVlan: ", err)
+		return err
+	}
+	return nil
+}

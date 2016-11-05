@@ -26,6 +26,8 @@
           loss added on the interface in percentage (default 0)
     -jitter uint
           jitter added on the interface in ms (default 0)
+    -mtu int
+          MTU of the interface
     -latency uint
           latency added on the interface in ms (default 0)
 ```
