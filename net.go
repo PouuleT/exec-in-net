@@ -69,7 +69,7 @@ func setLinkRoute(link *netlink.Link) error {
 	}
 	log.Debug("Setting a route for the gateway")
 	err = netlink.RouteAdd(&netlink.Route{
-		Scope:     netlink.SCOPE_UNIVERSE,
+		Scope:     netlink.SCOPE_LINK,
 		LinkIndex: (*link).Attrs().Index,
 		Dst:       gwaddrNet,
 	})
