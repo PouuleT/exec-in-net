@@ -31,3 +31,29 @@
     -latency uint
           latency added on the interface in ms (default 0)
 ```
+
+## Examples
+
+- Have multiple exit point on your network ?
+
+> Do a curl using the specific gateway 192.168.1.1
+
+```
+./exec-in-net -gw 192.168.1.1 -command "curl ifconfig.ovh"
+```
+
+- Have multiple public IP on your host ?
+
+> Do a curl from an interface using the specific IP 37.59.14.101
+
+```
+./exec-in-net -ip 37.59.14.101/32 -command "curl ifconfig.ovh"
+```
+
+- Want to simulate bad network environment ( packet loss / latency ) ?
+
+> Send 30 pings to google, with 10% loss, an added network latency of 50ms and an added variable lattency of 20 ms (jitter)
+
+```
+./exec-in-net -command "ping -c 30 8.8.8.8" -loss 10 -latency 50 -jitter 20
+```
