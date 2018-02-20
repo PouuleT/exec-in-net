@@ -9,6 +9,7 @@ script:
 - gox -osarch="linux/arm" -osarch="linux/amd64" .
 deploy:
   provider: releases
+  skip_cleanup: true
   api_key:
     secure: FB9ToIWiK50Etrw1n39EIlHM5a6BMxeAibamuD9Kgqqiu6p9XUHexV/6y9dlTeUK3zGir3mdiHwWm4sHiyZg93lICCtJVGzEVZStHArw9cSbjfaGPorYSYAFo2Od+/k1+bIF9Q23aWwKRK0yli5qz3w1TApKj7Cx6jnCdy4qNCRQWDe0zHbjpneXQfJ7MMlKZD0GBS+gN8hxcLfuRvvBH4UdALhTfeM2UvjFmc8LQlbokaAg0uwLaYZINTavL7cf2WTdRfA/raJo5yNREZLswzA4birhx/6tVkBj99GQ/8M7paAPEhsNDjM8IUk/TTVN+DEqn2Rbq7K15gdZk6larq/9ZogFMs7HHj/B/J7FbtRQfzQk0KjHQG0AvqmF21rUzxOiaRGuXbz7iQChQp1XB6dsCe6Lul11tnBkZ0bAYATZiTW+I5ltov+D3nWLtllymHwEx3EavB9k7bHg2QntV4ImDLKsqe+kR11W4jobAIzG4QE4/TyaUBA7ZC6Mg9yYryrDGm61bwWrfX7xJ5WuKtrARgPmppYGnGrfb8W5kWu0e6hlymWSUVm1fC+twqSmI1TlkMuyAC+FKyHrZ5fj3cWw4QUn9TaBmAWa0NU4pRTQLRNedYpE5z/QYFouXNjBEpVmyFkys1k1mC2mMKB+M94kBxFMlgI9DAPa2xnVv1s=
   file:
