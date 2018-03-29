@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"syscall"
 
@@ -10,8 +9,6 @@ import (
 
 // newNS will create a new named namespace
 func newNS() (*netns.NsHandle, error) {
-	pid := os.Getpid()
-
 	// Create a new network namespace
 	log.Debug("Create a new ns")
 	newns, err := netns.New()
@@ -20,7 +17,7 @@ func newNS() (*netns.NsHandle, error) {
 		return nil, err
 	}
 
-	src := fmt.Sprintf("/proc/%d/ns/net", pid)
+	src := "/proc/self/ns/net"
 	target := nsPath
 
 	log.Debugf("Create file %s", target)
