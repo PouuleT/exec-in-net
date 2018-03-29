@@ -36,8 +36,8 @@ func newNS() (*netns.NsHandle, error) {
 
 	log.Debugf("Mount %s", target)
 
-	// Mount the namespace in /var/run/netns so it becomes a named namespace
-	if err := syscall.Mount(src, target, "proc", syscall.MS_BIND|syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV, ""); err != nil {
+	// Mount the netnsPath just like iproute2 does
+	if err := syscall.Mount(src, target, "none", syscall.MS_BIND, ""); err != nil {
 		return nil, err
 	}
 
@@ -101,15 +101,7 @@ func setupNetnsDir() error {
 
 	// Creating the netns directory
 	log.Debugf("Creating directory %s", netnsPath)
-	err = os.Mkdir(netnsPath, os.ModePerm)
-	if err != nil {
-		return nil
-	}
 
-	// Mounting the netns directory
-	log.Debugf("Mounting %s", netnsPath)
-	if err := syscall.Mount("tmpfs", netnsPath, "tmpfs", syscall.MS_NOEXEC|syscall.MS_NOSUID|syscall.MS_NODEV, ""); err != nil {
-		return err
-	}
-	return nil
+	// Create the netnsPath just like iproute2 does
+	return syscall.Mkdir(netnsPath, syscall.S_IRWXU|syscall.S_IRGRP|syscall.S_IXGRP|syscall.S_IROTH|syscall.S_IXOTH)
 }
