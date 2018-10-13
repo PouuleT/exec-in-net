@@ -92,9 +92,9 @@ func initVar() error {
 			return err
 		}
 
-		for _, r := range routes {
-			if r.Gw != nil {
-				gateway = r.Gw.String()
+		for i := range routes {
+			if routes[i].Gw != nil {
+				gateway = routes[i].Gw.String()
 				break
 			}
 		}
