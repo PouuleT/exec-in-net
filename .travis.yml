@@ -3,10 +3,10 @@ go:
 - 1.13.3
 sudo: false
 before_install:
-- go get github.com/mitchellh/gox
 - go get -v ./...
 script:
-- gox -osarch="linux/arm" -osarch="linux/amd64" .
+- GOOS=linux  GOARCH=arm  ; go build -o exec-in-net_${GOOS}_${GOARCH} .
+- GOOS=linux  GOARCH=amd64; go build -o exec-in-net_${GOOS}_${GOARCH} .
 deploy:
   provider: releases
   skip_cleanup: true
