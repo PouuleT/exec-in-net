@@ -99,7 +99,7 @@ func initVar() error {
 			}
 		}
 		if gateway == "" {
-			return fmt.Errorf("Couldn't find a default gateway for the specified interface")
+			return fmt.Errorf("couldn't find a default gateway for the specified interface")
 		}
 	}
 	gwaddr = net.ParseIP(gateway)

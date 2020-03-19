@@ -77,7 +77,7 @@ func deleteNS(ns *netns.NsHandle) error {
 	// Delete the namespace file
 	log.Debugf("Deleting %s", target)
 	if err := os.Remove(target); err != nil {
-		log.Warn("Error while deleting %s : %s", target, err)
+		log.Warnf("Error while deleting %s : %s", target, err)
 		return err
 	}
 
