@@ -64,7 +64,7 @@ func setLinkRoute(link *netlink.Link) error {
 	// Add a route for the gateway
 	_, gwaddrNet, err := net.ParseCIDR(fmt.Sprintf("%s/32", gwaddr.String()))
 	if err != nil {
-		log.Warnf("Error when parsing gateway", err)
+		log.Warnf("Error when parsing gateway: %s", err)
 		return err
 	}
 	log.Debug("Setting a route for the gateway")
@@ -111,7 +111,7 @@ func setMacVlanMTU(link *netlink.Link) error {
 	if mtu == 0 {
 		return nil
 	}
-	log.Debugf("Setting macVlan with specified MTU : %s", mtu)
+	log.Debugf("Setting macVlan with specified MTU : %d", mtu)
 	err = netlink.LinkSetMTU(*link, mtu)
 	if err != nil {
 		log.Warn("Error while setting given mtu on macVlan: ", err)
