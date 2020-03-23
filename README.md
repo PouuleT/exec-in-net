@@ -1,6 +1,6 @@
 # Exec in network
 
-[![Build Status](https://travis-ci.org/PouuleT/exec-in-net.svg?branch=master)](https://travis-ci.org/PouuleT/exec-in-net)
+[![Build Status](https://github.com/PouuleT/exec-in-net/workflows/Build/badge.svg?branch=master)](https://github.com/PouuleT/exec-in-net/workflows/Build/badge.svg?branch=master) 
 [![Go Report Card](https://goreportcard.com/badge/github.com/PouuleT/exec-in-net)](https://goreportcard.com/report/github.com/PouuleT/exec-in-net)
 
 > Execute any commands within a network namespace with its own IP and route
